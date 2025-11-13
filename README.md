@@ -92,6 +92,41 @@ This package implements commonly used NCL meteorology calculation functions:
 - `coriolis_param` - Coriolis parameter
 - `wetbulb_stull` - Wet bulb temperature (Stull's method)
 
+### Statistics Functions
+
+This package implements commonly used NCL statistics functions:
+
+**Dimensional Operations:**
+- `dim_avg_n`, `dim_stddev_n`, `dim_variance_n` - Statistics over dimensions
+- `dim_max_n`, `dim_min_n`, `dim_median_n`, `dim_sum_n` - Min/max/median/sum
+- `dim_cumsum_n` - Cumulative sum
+- `dim_rmvmean_n`, `dim_rmvmed_n` - Remove mean/median
+- `dim_standardize_n` - Standardize/normalize data
+- `dim_rmsd_n` - Root-mean-square-difference
+
+**Correlation:**
+- `escorc_n` - Pearson correlation at lag 0
+- `escovc` - Sample cross-covariance
+- `pattern_cor` - Pattern correlation for spatial fields
+
+**Regression:**
+- `regline` - Simple linear regression for 1D arrays
+- `regCoef_n` - Linear regression coefficients for multi-dimensional arrays
+
+**Trend Analysis:**
+- `dtrend_n` - Remove least squares linear trend
+- `dtrend_msg_n` - Remove trend (handles missing values)
+
+**Statistical Tests:**
+- `ttest` - Student's t-test
+- `ftest` - F-test for variances
+- `student_t` - Student's t-distribution probability
+
+**Other Functions:**
+- `equiv_sample_size` - Effective sample size accounting for autocorrelation
+- `taylor_stats` - Taylor diagram statistics
+- `bin_avg`, `bin_sum` - Binning operations
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -709,6 +744,205 @@ for t, r, w in zip(temp_c, rh, tw):
     print(f"  {t:4.0f}     {r:3.0f}      {w:5.1f}")
 ```
 
+### Statistics Examples
+
+#### Dimensional Statistics
+
+```python
+import numpy as np
+from ncl_tools.statistics import dim_avg_n, dim_stddev_n, dim_variance_n, dim_max_n
+
+# Create sample 3D data (time, lat, lon)
+data = np.random.randn(100, 50, 100)  # 100 time steps, 50 lats, 100 lons
+
+# Calculate time average at each grid point
+time_avg = dim_avg_n(data, 0)  # Average over dimension 0 (time)
+print(f"Time average shape: {time_avg.shape}")  # (50, 100)
+
+# Calculate standard deviation over time
+time_std = dim_stddev_n(data, 0)
+print(f"Time std shape: {time_std.shape}")  # (50, 100)
+
+# Calculate variance over spatial dimensions
+spatial_var = dim_variance_n(data, [1, 2])  # Over dims 1 and 2 (lat, lon)
+print(f"Spatial variance shape: {spatial_var.shape}")  # (100,)
+
+# Find maximum along time dimension
+max_vals = dim_max_n(data, 0)
+print(f"Maximum values shape: {max_vals.shape}")  # (50, 100)
+```
+
+#### Remove Mean and Standardize
+
+```python
+from ncl_tools.statistics import dim_rmvmean_n, dim_standardize_n
+
+# Remove temporal mean at each grid point
+anomalies = dim_rmvmean_n(data, 0)
+print(f"Mean of anomalies: {np.mean(anomalies):.10f}")  # Close to 0
+
+# Standardize data (remove mean and divide by std)
+standardized = dim_standardize_n(data, 0, opt=1)
+print(f"Mean: {np.mean(dim_avg_n(standardized, 0)):.10f}")  # ~0
+print(f"Std: {np.mean(dim_stddev_n(standardized, 0)):.6f}")  # ~1
+```
+
+#### Correlation Analysis
+
+```python
+from ncl_tools.statistics import escorc_n, pattern_cor
+
+# Two time series at each grid point
+sst = np.random.randn(120, 50, 100)  # SST data
+precip = sst + np.random.randn(120, 50, 100) * 0.5  # Correlated precipitation
+
+# Calculate temporal correlation at each grid point
+# dims_x=0, dims_y=0 means correlate along dimension 0 (time)
+correlation = escorc_n(sst, precip, 0, 0)
+print(f"Correlation shape: {correlation.shape}")  # (50, 100)
+print(f"Mean correlation: {np.mean(correlation):.3f}")
+
+# Calculate pattern correlation between two spatial fields
+field1 = sst[0]  # First time step
+field2 = sst[50]  # Middle time step
+weights = None  # No weighting
+pattern_corr = pattern_cor(field1, field2, weights, opt=0)
+print(f"Pattern correlation: {pattern_corr:.3f}")
+```
+
+#### Linear Regression
+
+```python
+from ncl_tools.statistics import regline, regCoef_n
+
+# Simple 1D regression
+years = np.arange(1950, 2024)
+temp = 14.5 + 0.02 * (years - 1950) + np.random.randn(74) * 0.3
+
+result = regline(years, temp)
+print(f"Trend: {result.value:.4f} °C/year")
+print(f"Y-intercept: {result.yintercept:.2f} °C")
+print(f"T-statistic: {result.tval:.2f}")
+print(f"Standard error: {result.rstd:.6f}")
+
+# Multi-dimensional regression: trend at each grid point
+time = np.arange(100)
+data_with_trend = 0.01 * time[:, None, None] + np.random.randn(100, 50, 100)
+
+# Calculate trend at each grid point
+# dims_x=0, dims_y=0 means regress along dimension 0
+trends = regCoef_n(time, data_with_trend, 0, 0)
+print(f"Trends shape: {trends.shape}")  # (50, 100)
+print(f"Mean trend: {np.mean(trends):.5f}")  # Should be close to 0.01
+print(f"T-statistics: {trends.tval.shape}")  # (50, 100)
+```
+
+#### Detrend Data
+
+```python
+from ncl_tools.statistics import dtrend_n
+
+# Remove linear trend from time series
+data_detrended = dtrend_n(data, return_info=True, dim=0)
+print(f"Detrended shape: {data_detrended.shape}")  # Same as input
+print(f"Slope shape: {data_detrended.slope.shape}")  # (50, 100)
+print(f"Mean after detrending: {np.mean(dim_avg_n(data_detrended, 0)):.10f}")
+
+# For data with missing values, use dtrend_msg_n
+data_with_nan = data.copy()
+data_with_nan[data_with_nan > 2] = np.nan  # Add some missing values
+
+detrended_nan = dtrend_msg_n(data_with_nan, x=None, return_info=False,
+                               iopt=1, dim=0)
+print(f"Detrended with NaN shape: {detrended_nan.shape}")
+```
+
+#### Statistical Tests
+
+```python
+from ncl_tools.statistics import ttest, ftest, student_t
+
+# T-test: Compare two sample means
+sample1_mean = 10.5
+sample1_var = 2.3
+sample1_n = 30
+
+sample2_mean = 11.2
+sample2_var = 2.8
+sample2_n = 35
+
+# Assuming equal variances
+prob = ttest(sample1_mean, sample1_var, sample1_n,
+             sample2_mean, sample2_var, sample2_n,
+             iflag=True, tval_opt=False)
+print(f"T-test probability: {prob:.4f}")
+if prob < 0.05:
+    print("Difference is statistically significant at 95% level")
+
+# F-test: Compare two sample variances
+f_prob = ftest(sample1_var, sample1_n, sample2_var, sample2_n, opt=0)
+print(f"F-test probability: {f_prob:.4f}")
+
+# Calculate probability for given t-value
+t_value = 2.5
+df = 28
+p_value = student_t(t_value, df)
+print(f"Two-tailed p-value for t={t_value}: {p_value:.4f}")
+```
+
+#### Taylor Diagram Statistics
+
+```python
+from ncl_tools.statistics import taylor_stats
+
+# Compare model output to observations
+observations = np.random.randn(1000)
+model_output = 0.8 * observations + np.random.randn(1000) * 0.5
+
+stats = taylor_stats(observations, model_output, opt=0)
+print(f"Correlation: {stats[0]:.3f}")
+print(f"Std ratio (model/obs): {stats[1]:.3f}")
+print(f"Centered RMSD (normalized): {stats[2]:.3f}")
+```
+
+#### Binning Operations
+
+```python
+from ncl_tools.statistics import bin_avg, bin_sum
+
+# Create some data to bin
+x = np.random.randn(1000) * 10 + 50  # Values around 50
+y = x * 2 + np.random.randn(1000) * 5  # Correlated values
+
+# Define bins
+bins = np.linspace(20, 80, 13)  # 12 bins from 20 to 80
+
+# Calculate bin averages
+bin_centers, bin_avgs, bin_counts = bin_avg(x, y, bins)
+print(f"Bin centers: {bin_centers}")
+print(f"Bin averages: {bin_avgs}")
+print(f"Bin counts: {bin_counts}")
+
+# Calculate bin sums
+bin_centers, bin_sums, bin_counts = bin_sum(x, y, bins)
+print(f"Bin sums: {bin_sums}")
+```
+
+#### Effective Sample Size
+
+```python
+from ncl_tools.statistics import equiv_sample_size
+
+# Time series with autocorrelation
+time_series = np.random.randn(100, 50, 100)
+
+# Estimate effective sample size accounting for temporal autocorrelation
+n_eff = equiv_sample_size(time_series, siglvl=0.05, dims=0)
+print(f"Effective sample size shape: {n_eff.shape}")  # (50, 100)
+print(f"Mean effective n: {np.mean(n_eff):.1f}")
+print(f"Actual sample size: {time_series.shape[0]}")
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -730,6 +964,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL Extreme Value Functions](https://www.ncl.ucar.edu/Document/Functions/extval.shtml)
 - [NCL Latitude/Longitude Functions](https://www.ncl.ucar.edu/Document/Functions/latlon_funcs.shtml)
 - [NCL Meteorology Functions](https://www.ncl.ucar.edu/Document/Functions/meteo.shtml)
+- [NCL Statistics Functions](https://www.ncl.ucar.edu/Document/Functions/statistics.shtml)
 
 ## License
 
