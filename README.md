@@ -4,7 +4,7 @@ Python implementation of NCL (NCAR Command Language) functions using NumPy.
 
 ## Overview
 
-This package provides pure Python implementations of various NCL functions, focusing on heat stress and meteorological calculations. All functions are implemented using only NumPy, making them fast and easy to integrate into existing scientific Python workflows.
+This package provides pure Python implementations of various NCL functions, focusing on heat stress, extreme value statistics, and meteorological calculations. All functions are implemented using NumPy and SciPy, making them fast and easy to integrate into existing scientific Python workflows.
 
 ## Installation
 
@@ -26,6 +26,7 @@ pip install ncl-tools
 
 - Python >= 3.7
 - NumPy >= 1.18.0
+- SciPy >= 1.5.0
 
 ## Features
 
@@ -45,7 +46,24 @@ This package currently implements all NCL heat stress functions:
 - `heat_wbgt_inout` - Wet-bulb globe temperature (indoor/outdoor)
 - `heat_wbgt_simplified` - Simplified WBGT
 
+### Extreme Value Functions
+
+This package implements all NCL extreme value statistics functions:
+
+- `extval_frechet` - Frechet Type II distribution (PDF and CDF)
+- `extval_gev` - Generalized Extreme Value (GEV) distribution (PDF and CDF)
+- `extval_gumbel` - Gumbel (Type I) distribution (PDF and CDF)
+- `extval_weibull` - Weibull Type III distribution (PDF and CDF)
+- `extval_pareto` - Pareto distributions (Generalized, Type I, Type II)
+- `extval_mlegev` - Maximum Likelihood Estimation for GEV parameters
+- `extval_mlegam` - Maximum Likelihood Estimation for Gamma parameters
+- `extval_recurrence_table` - Recurrence intervals and probabilities
+- `extval_return_period` - Return period calculations
+- `extval_return_prob` - Return probability calculations
+
 ## Usage Examples
+
+### Heat Stress Examples
 
 ### Haines Fire Index
 
@@ -184,6 +202,165 @@ for t, rh, hi in zip(temperatures, humidities, heat_indices):
     print(f"T={t}°F, RH={rh}% -> HI={hi:.1f}°F")
 ```
 
+### Extreme Value Examples
+
+#### GEV Distribution
+
+```python
+import numpy as np
+from ncl_tools.extval import extval_gev
+
+# Define x values and GEV parameters
+x = np.linspace(-4, 6, 200)
+shape = np.array([-0.5, 0.0, 0.5])  # Weibull, Gumbel, Frechet
+scale = np.array([1.0, 1.0, 1.0])
+center = np.array([0.0, 0.0, 0.0])
+
+# Calculate PDF and CDF
+pdf, cdf = extval_gev(x, shape, scale, center)
+
+# pdf and cdf have shape (3, 200) - three distributions over 200 x values
+print(f"PDF shape: {pdf.shape}")
+print(f"CDF at x=1.0 for each distribution: {cdf[:, 100]}")
+```
+
+#### Gumbel Distribution
+
+```python
+from ncl_tools.extval import extval_gumbel
+
+# Temperature data
+x = np.linspace(-10, 20, 100)
+scale = np.array([2.0, 3.0, 4.0])
+center = np.array([0.5, 1.0, 1.5])
+
+pdf, cdf = extval_gumbel(x, scale, center)
+print(f"Gumbel PDF: {pdf[0, :5]}")  # First 5 values for first distribution
+```
+
+#### Frechet Distribution
+
+```python
+from ncl_tools.extval import extval_frechet
+
+x = np.linspace(0.05, 5.5, 100)
+shape = np.array([0.5, 1.0, 2.0])
+scale = np.array([1.0, 1.0, 1.0])
+center = np.array([0.0, 0.0, 0.0])
+
+pdf, cdf = extval_frechet(x, shape, scale, center)
+```
+
+#### Weibull Distribution
+
+```python
+from ncl_tools.extval import extval_weibull
+
+x = np.linspace(0, 5, 100)
+shape = np.array([0.5, 1.0, 1.5, 5.0])
+scale = np.array([1.0, 1.0, 1.0, 1.0])
+center = np.array([0.0, 0.0, 0.0, 0.0])
+
+pdf, cdf = extval_weibull(x, shape, scale, center)
+```
+
+#### Pareto Distribution
+
+```python
+from ncl_tools.extval import extval_pareto
+
+x = np.linspace(0.05, 5.5, 100)
+shape = np.array([0.5, 1.0, 2.0])
+scale = np.array([1.0, 1.0, 1.0])
+center = np.array([0.0, 0.0, 0.0])
+
+# Generalized Pareto (ptype=0)
+pdf, cdf = extval_pareto(x, shape, scale, center, ptype=0)
+
+# Type I Pareto (ptype=1)
+pdf1, cdf1 = extval_pareto(x, shape, scale, center, ptype=1)
+
+# Type II Pareto/Lomax (ptype=2)
+pdf2, cdf2 = extval_pareto(x, shape, scale, center, ptype=2)
+```
+
+#### Maximum Likelihood Estimation for GEV
+
+```python
+from ncl_tools.extval import extval_mlegev
+
+# Flood data (annual maximum river discharge)
+flood_data = np.array([487, 732, 784, 965, 1049, 1585, 612, 1156,
+                       643, 770, 612, 531, 987, 743, 665])
+
+# Estimate GEV parameters
+params = extval_mlegev(flood_data, dims=0)
+
+location, scale, shape, se_loc, se_scale, se_shape = params
+print(f"Location: {location:.2f} (SE: {se_loc:.2f})")
+print(f"Scale: {scale:.2f} (SE: {se_scale:.2f})")
+print(f"Shape: {shape:.4f} (SE: {se_shape:.4f})")
+```
+
+#### Maximum Likelihood Estimation for Gamma
+
+```python
+from ncl_tools.extval import extval_mlegam
+
+# Sample data
+data = np.array([112, 118, 132, 129, 121, 135, 148, 136, 119, 104])
+
+# Estimate Gamma parameters
+params = extval_mlegam(data, dims=0)
+
+location, scale, shape, variance, median = params
+print(f"Location: {location:.2f}")
+print(f"Scale: {scale:.2f}")
+print(f"Shape: {shape:.2f}")
+print(f"Variance: {variance:.2f}")
+print(f"Median: {median:.2f}")
+```
+
+#### Recurrence Table
+
+```python
+from ncl_tools.extval import extval_recurrence_table
+
+# Annual maximum precipitation data
+years = np.arange(1931, 1941)
+precipitation = np.array([1306, 1345, 1032, 1580, 1293, 1497,
+                         1469, 1392, 1037, 1633])
+
+# Calculate recurrence intervals
+table = extval_recurrence_table(years, precipitation, dims=0)
+
+# Table columns: [time, x, cum_prob_rank, cum_prob,
+#                 exc_prob_rank, exc_prob, recurrence_interval]
+print("Year  Precip  Recurrence")
+for i in range(len(table)):
+    print(f"{table[i,0]:.0f}  {table[i,1]:.0f}      {table[i,6]:.2f}")
+```
+
+#### Return Period and Probability
+
+```python
+from ncl_tools.extval import extval_return_period, extval_return_prob
+
+# Calculate return period
+# For a 100-year flood with 95% confidence
+recurrence_interval = 100  # years
+probability = 0.95
+period = extval_return_period(recurrence_interval, probability)
+print(f"Return period: {period:.1f} years")
+
+# Calculate return probability
+# Probability of 10-year event occurring in next 8 years
+avg_interval = 10  # years
+exceedance_period = 8  # years
+prob = extval_return_prob(avg_interval, exceedance_period)
+print(f"Probability: {prob:.4f} or {prob*100:.2f}%")
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -202,6 +379,7 @@ Most functions use an `iounit` parameter to specify input/output units:
 
 All functions are based on NCL implementations and follow the same algorithms and formulas. For more details, see:
 - [NCL Heat Stress Functions](https://www.ncl.ucar.edu/Document/Functions/heat_stress.shtml)
+- [NCL Extreme Value Functions](https://www.ncl.ucar.edu/Document/Functions/extval.shtml)
 
 ## License
 
