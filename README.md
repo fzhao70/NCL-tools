@@ -565,17 +565,28 @@ print(f"Dew point: {dewpoint - 273.15:.1f}°C")
 rh_calc = relhum_ttd(temp, dewpoint)
 print(f"Relative humidity: {rh_calc:.1f}%")
 
+# Calculate saturation vapor pressure using Bolton's equation
+# iounit: [input temp units, output pressure units]
+# 1=Kelvin, 1=Pa
+es = satvpr_water_bolton(temp, [1, 1])
+print(f"Saturation vapor pressure: {es:.1f} Pa")
+
 # Calculate mixing ratio
-pres = 100000.0  # 1000 hPa in Pascals
-mixr = mixhum_ptrh(pres, temp, rh)
+pres_hpa = 1000.0  # Pressure in hPa
+# iswit: 1=mixing ratio in kg/kg, -1=mixing ratio in g/kg
+mixr = mixhum_ptrh(pres_hpa, temp, rh, iswit=1)
 print(f"Mixing ratio: {mixr*1000:.2f} g/kg")
 
 # Calculate virtual temperature
-tv = temp_virtual(temp, mixr)
+# iounit: [input temp units, input mixr units, output temp units]
+# 1=Kelvin, 0=kg/kg, 1=Kelvin
+tv = temp_virtual(temp, mixr, [1, 0, 1])
 print(f"Virtual temperature: {tv - 273.15:.2f}°C")
 
 # Calculate potential temperature
-theta = pot_temp(temp, pres)
+pres = 100000.0  # Pressure in Pa
+# Parameters: (pressure, temperature, dim, opt)
+theta = pot_temp(pres, temp, -1, False)
 print(f"Potential temperature: {theta - 273.15:.2f}°C")
 ```
 
@@ -589,12 +600,14 @@ u = 5.0   # m/s (eastward)
 v = 8.66  # m/s (northward)
 
 wspd = wind_speed(u, v)
-wdir = wind_direction(u, v)
+# opt: 0=return 0 for calm, 1=return NaN for calm
+wdir = wind_direction(u, v, opt=0)
 print(f"Wind speed: {wspd:.1f} m/s")
 print(f"Wind direction: {wdir:.0f}° (from the {['N','NE','E','SE','S','SW','W','NW'][int(wdir/45)]})")
 
 # Calculate components from speed and direction
-u_calc, v_calc = wind_component(wspd, wdir)
+# opt parameter currently unused, set to 0
+u_calc, v_calc = wind_component(wspd, wdir, opt=0)
 print(f"U component: {u_calc:.2f} m/s")
 print(f"V component: {v_calc:.2f} m/s")
 ```
@@ -606,39 +619,49 @@ from ncl_tools.meteo import omega_to_w, w_to_omega, dpres_plevel, pres_sigma
 
 # Convert omega to w
 omega = -0.5  # Pa/s (negative = upward motion)
-pres = 50000.0  # 500 hPa
-temp = 253.15   # -20°C
+pres = 50000.0  # 500 hPa in Pa
+temp = 253.15   # -20°C in K
 w = omega_to_w(omega, pres, temp)
 print(f"Vertical velocity: {w*100:.2f} cm/s")
 
 # Calculate pressure layer thickness
+# Parameters: (plev, psfc, ptop, iopt)
 plev = np.array([100000, 92500, 85000, 70000, 50000, 30000])  # Pa
-dp = dpres_plevel(plev)
+psfc = 101325.0  # Surface pressure in Pa
+ptop = 10000.0   # Top pressure in Pa
+dp = dpres_plevel(plev, psfc, ptop, 0)
 print(f"Pressure thickness: {dp}")
 
 # Calculate pressure at sigma levels
-psfc = 101325.0  # Sea level pressure
+# Parameters: (sigma, ps) - note order!
 sigma = np.array([1.0, 0.9, 0.7, 0.5, 0.3, 0.1])
-p_sigma = pres_sigma(psfc, sigma)
-print(f"Pressures at sigma levels: {p_sigma/100:.0f} hPa")
+psfc_2d = np.ones((10, 20)) * 101325.0  # Surface pressure field (lat, lon)
+p_sigma = pres_sigma(sigma, psfc_2d)
+print(f"Shape: {p_sigma.shape}")  # (6, 10, 20)
+print(f"Surface level pressure: {p_sigma[0, 0, 0]/100:.0f} hPa")
 ```
 
 #### Geopotential Height and Precipitable Water
 
 ```python
-from ncl_tools.meteo import hydro, prcwater_dp
+from ncl_tools.meteo import hydro, prcwater_dp, dpres_plevel
 
 # Calculate geopotential height
-pres = np.array([100000, 92500, 85000, 70000, 50000])  # Pa
-temp = np.array([288, 282, 276, 268, 253])  # K
-q = np.array([0.012, 0.008, 0.005, 0.002, 0.0005])  # kg/kg
-z_surface = 0.0  # meters
+# Parameters: (p in mb, tkv in K, zsfc in gpm) - bottom to top order!
+p_mb = np.array([1000, 925, 850, 700, 500])  # mb (bottom to top)
+tkv = np.array([288, 282, 276, 268, 253])    # Virtual temperature in K
+zsfc = 0.0  # Surface height in gpm
 
-z = hydro(pres, temp, q, z_surface)
-print(f"Geopotential heights: {z} meters")
+z = hydro(p_mb, tkv, zsfc)
+print(f"Geopotential heights: {z} gpm")
 
 # Calculate precipitable water
-dp = dpres_plevel(pres)
+# Need pressure layer thickness
+q = np.array([0.012, 0.008, 0.005, 0.002, 0.0005])  # kg/kg
+p_pa = p_mb * 100  # Convert to Pa
+psfc = p_pa[0]
+ptop = p_pa[-1] / 2
+dp = dpres_plevel(p_pa, psfc, ptop, 0)
 pw = prcwater_dp(q, dp)
 print(f"Precipitable water: {pw:.2f} kg/m²")
 ```
@@ -661,10 +684,12 @@ lons = np.linspace(0, 360, nlon, endpoint=False)
 u = np.random.randn(nlat, nlon) * 10
 v = np.random.randn(nlat, nlon) * 10
 
-vorticity = uv2vr_cfd(u, v, lats, lons)
-divergence = uv2dv_cfd(u, v, lats, lons)
-print(f"Vorticity range: {vorticity.min():.2e} to {vorticity.max():.2e} s^-1")
-print(f"Divergence range: {divergence.min():.2e} to {divergence.max():.2e} s^-1")
+# boundOpt: 0=boundaries set to NaN, 1=cyclic in lon,
+#           2=one-sided diffs, 3=cyclic lon + one-sided lat
+vorticity = uv2vr_cfd(u, v, lats, lons, boundOpt=1)
+divergence = uv2dv_cfd(u, v, lats, lons, boundOpt=1)
+print(f"Vorticity range: {np.nanmin(vorticity):.2e} to {np.nanmax(vorticity):.2e} s^-1")
+print(f"Divergence range: {np.nanmin(divergence):.2e} to {np.nanmax(divergence):.2e} s^-1")
 ```
 
 #### Wet Bulb Temperature
@@ -676,7 +701,9 @@ from ncl_tools.meteo import wetbulb_stull
 temp_c = np.array([20, 25, 30, 35])  # Celsius
 rh = np.array([50, 60, 70, 80])      # %
 
-tw = wetbulb_stull(temp_c, rh)
+# iounit: [input temp units, output temp units]
+# 0=Celsius, 1=Kelvin, 2=Fahrenheit
+tw = wetbulb_stull(temp_c, rh, [0, 0], False)
 print("Temp(°C)  RH(%)  Wet Bulb(°C)")
 for t, r, w in zip(temp_c, rh, tw):
     print(f"  {t:4.0f}     {r:3.0f}      {w:5.1f}")
