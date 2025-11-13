@@ -148,6 +148,15 @@ This package implements comprehensive EOF/PCA analysis tools:
 - `eofunc_varimax_reorder` - Reorder rotated EOFs by variance
 - `eofunc_north` - Test eigenvalue significance (North et al. 1982)
 
+### Printing Functions
+
+This package implements NCL's printing and output functions:
+
+- `printVarSummary` - Display variable metadata (type, dimensions, size, attributes)
+- `printMinMax` - Display minimum and maximum values
+- `write_matrix` - Output formatted 2D arrays with Fortran-style format strings
+- `show_ascii` - Display ASCII character table
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -1153,6 +1162,154 @@ print(f"\nEOF 1 pattern shape: {eofs[..., 0].shape}")
 print(f"PC 1 time series shape: {pcs[0].shape}")
 ```
 
+### Printing and Output Functions
+
+#### Display Variable Information
+
+```python
+from ncl_tools.printing import printVarSummary, printMinMax
+import numpy as np
+
+# Create sample climate data
+temperature = np.random.randn(12, 50, 100) * 10 + 15  # 12 months, 50x100 grid
+
+# Display variable summary (metadata only, no values)
+printVarSummary(temperature, "temperature")
+
+# Output:
+# Variable: temperature
+# Type: float64
+# Total Size: 480000 bytes
+#             60000 values
+# Number of Dimensions: 3
+# Dimensions and sizes:	[12] x [50] x [100]
+
+# Display min/max values
+printMinMax(temperature, opt=True, var_name="temperature")
+
+# Output:
+# temperature : min=-20.5   max=48.3
+```
+
+#### Formatted Matrix Output
+
+```python
+from ncl_tools.printing import write_matrix
+import numpy as np
+
+# Create a 2D array
+data = np.random.randn(5, 7) * 100 + 500
+
+# Output with F format (fixed-point): 7 columns, width 10, 2 decimals
+write_matrix(data, "7f10.2", False)
+
+# Output:
+#     512.34    487.23    523.45    456.78    534.12    498.56    511.23
+#     489.45    521.67    478.90    534.56    501.23    489.78    512.34
+#     ...
+
+# With title and row numbers
+options = {
+    'title': 'Temperature Data (K)',
+    'tspace': 5,
+    'row': True
+}
+write_matrix(data, "7f10.2", options)
+
+# Output:
+#      Temperature Data (K)
+#     0     512.34    487.23    523.45    456.78    534.12    498.56    511.23
+#     1     489.45    521.67    478.90    534.56    501.23    489.78    512.34
+#     ...
+
+# Different format examples
+print("\nInteger format:")
+int_data = np.random.randint(100, 1000, (3, 5))
+write_matrix(int_data, "5i8", False)
+
+print("\nExponential format:")
+sci_data = np.random.randn(3, 4) * 1e-5
+write_matrix(sci_data, "4e15.5", False)
+
+print("\nMixed format:")
+mixed_data = np.random.randn(4, 6)
+write_matrix(mixed_data, "2i6,4f10.3", False)
+
+# Write to file
+write_matrix(data, "7f10.2", {'fout': 'output.txt', 'title': 'Data Output'})
+print("Data written to output.txt")
+```
+
+#### Display ASCII Table
+
+```python
+from ncl_tools.printing import show_ascii
+
+# Display complete ASCII character table
+show_ascii()
+
+# Output:
+# ASCII Character Table
+# ================================================================================
+#   0: nul    1: soh    2: stx    3: etx    4: eot    5: enq    6: ack    7: bel
+#   8:  bs    9:  ht   10:  nl   11:  vt   12:  np   13:  cr   14:  so   15:  si
+#  16: dle   17: dc1   18: dc2   19: dc3   20: dc4   21: nak   22: syn   23: etb
+#  24: can   25:  em   26: sub   27: esc   28:  fs   29:  gs   30:  rs   31:  us
+#  32:  sp   33:   !   34:   "   35:   #   36:   $   37:   %   38:   &   39:   '
+#  ...
+# ================================================================================
+```
+
+#### Combined Usage Example
+
+```python
+from ncl_tools.printing import printVarSummary, printMinMax, write_matrix
+import numpy as np
+
+# Simulate monthly climate data
+months = 12
+lat_points = 20
+lon_points = 30
+
+# Temperature data
+temp = np.random.randn(months, lat_points, lon_points) * 5 + 20
+
+# Analyze the data
+print("="*60)
+print("CLIMATE DATA ANALYSIS")
+print("="*60)
+
+printVarSummary(temp, "monthly_temperature")
+printMinMax(temp, opt=True, var_name="Temperature (°C)")
+
+# Calculate monthly means
+monthly_means = temp.mean(axis=(1, 2))
+
+print("\nMonthly Mean Temperatures:")
+month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+# Create output matrix with month index and mean
+output_data = np.column_stack([np.arange(1, 13), monthly_means])
+print("\nMonth  Mean Temp (°C)")
+write_matrix(output_data, "i5,f10.2", False)
+
+# Calculate spatial means for each month
+spatial_stats = np.column_stack([
+    np.arange(1, 13),
+    temp.mean(axis=(1, 2)),
+    temp.std(axis=(1, 2)),
+    temp.min(axis=(1, 2)),
+    temp.max(axis=(1, 2))
+])
+
+print("\n" + "="*60)
+print("Monthly Statistics")
+print("="*60)
+print("Month    Mean     Std      Min      Max")
+write_matrix(spatial_stats, "i5,4f9.2", False)
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -1176,6 +1333,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL Meteorology Functions](https://www.ncl.ucar.edu/Document/Functions/meteo.shtml)
 - [NCL Statistics Functions](https://www.ncl.ucar.edu/Document/Functions/statistics.shtml)
 - [NCL EOF Functions](https://www.ncl.ucar.edu/Document/Functions/eofs.shtml)
+- [NCL Printing Functions](https://www.ncl.ucar.edu/Document/Functions/printing.shtml)
 
 ## License
 
