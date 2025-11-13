@@ -61,6 +61,37 @@ This package implements all NCL extreme value statistics functions:
 - `extval_return_period` - Return period calculations
 - `extval_return_prob` - Return probability calculations
 
+### Meteorology Functions
+
+This package implements commonly used NCL meteorology calculation functions:
+
+**Thermodynamic Functions:**
+- `satvpr_water_bolton` - Saturation vapor pressure (Bolton's equation)
+- `dewtemp_trh` - Dew point from temperature and relative humidity
+- `relhum`, `relhum_ttd` - Relative humidity calculations
+- `mixhum_ptd`, `mixhum_ptrh` - Mixing ratio calculations
+- `temp_virtual` - Virtual temperature
+- `pot_temp` - Potential temperature
+- `static_stability` - Atmospheric static stability
+
+**Pressure and Vertical Coordinates:**
+- `dpres_plevel` - Pressure layer thickness
+- `pres_sigma` - Pressure at sigma levels
+- `omega_to_w`, `w_to_omega` - Convert vertical velocity units
+- `hydro` - Geopotential height from hydrostatic equation
+- `prcwater_dp` - Total column precipitable water
+
+**Wind Functions:**
+- `wind_speed` - Calculate wind speed from u, v components
+- `wind_direction` - Calculate wind direction from u, v
+- `wind_component` - Calculate u, v from speed and direction
+- `uv2dv_cfd` - Divergence from wind components
+- `uv2vr_cfd` - Relative vorticity from wind components
+
+**Other Meteorological Functions:**
+- `coriolis_param` - Coriolis parameter
+- `wetbulb_stull` - Wet bulb temperature (Stull's method)
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -515,6 +546,142 @@ inside = gc_inout(test_lats, test_lons, lat_poly, lon_poly)
 print(f"Points inside polygon: {inside}")  # [True, True, False]
 ```
 
+### Meteorology Examples
+
+#### Thermodynamic Calculations
+
+```python
+import numpy as np
+from ncl_tools.meteo import (dewtemp_trh, relhum_ttd, mixhum_ptrh,
+                               temp_virtual, pot_temp, satvpr_water_bolton)
+
+# Calculate dew point from temperature and RH
+temp = 293.15  # 20°C in Kelvin
+rh = 65.0      # 65% relative humidity
+dewpoint = dewtemp_trh(temp, rh)
+print(f"Dew point: {dewpoint - 273.15:.1f}°C")
+
+# Calculate relative humidity from temperature and dew point
+rh_calc = relhum_ttd(temp, dewpoint)
+print(f"Relative humidity: {rh_calc:.1f}%")
+
+# Calculate mixing ratio
+pres = 100000.0  # 1000 hPa in Pascals
+mixr = mixhum_ptrh(pres, temp, rh)
+print(f"Mixing ratio: {mixr*1000:.2f} g/kg")
+
+# Calculate virtual temperature
+tv = temp_virtual(temp, mixr)
+print(f"Virtual temperature: {tv - 273.15:.2f}°C")
+
+# Calculate potential temperature
+theta = pot_temp(temp, pres)
+print(f"Potential temperature: {theta - 273.15:.2f}°C")
+```
+
+#### Wind Calculations
+
+```python
+from ncl_tools.meteo import wind_speed, wind_direction, wind_component
+
+# Calculate wind speed and direction from components
+u = 5.0   # m/s (eastward)
+v = 8.66  # m/s (northward)
+
+wspd = wind_speed(u, v)
+wdir = wind_direction(u, v)
+print(f"Wind speed: {wspd:.1f} m/s")
+print(f"Wind direction: {wdir:.0f}° (from the {['N','NE','E','SE','S','SW','W','NW'][int(wdir/45)]})")
+
+# Calculate components from speed and direction
+u_calc, v_calc = wind_component(wspd, wdir)
+print(f"U component: {u_calc:.2f} m/s")
+print(f"V component: {v_calc:.2f} m/s")
+```
+
+#### Vertical Velocity and Pressure
+
+```python
+from ncl_tools.meteo import omega_to_w, w_to_omega, dpres_plevel, pres_sigma
+
+# Convert omega to w
+omega = -0.5  # Pa/s (negative = upward motion)
+pres = 50000.0  # 500 hPa
+temp = 253.15   # -20°C
+w = omega_to_w(omega, pres, temp)
+print(f"Vertical velocity: {w*100:.2f} cm/s")
+
+# Calculate pressure layer thickness
+plev = np.array([100000, 92500, 85000, 70000, 50000, 30000])  # Pa
+dp = dpres_plevel(plev)
+print(f"Pressure thickness: {dp}")
+
+# Calculate pressure at sigma levels
+psfc = 101325.0  # Sea level pressure
+sigma = np.array([1.0, 0.9, 0.7, 0.5, 0.3, 0.1])
+p_sigma = pres_sigma(psfc, sigma)
+print(f"Pressures at sigma levels: {p_sigma/100:.0f} hPa")
+```
+
+#### Geopotential Height and Precipitable Water
+
+```python
+from ncl_tools.meteo import hydro, prcwater_dp
+
+# Calculate geopotential height
+pres = np.array([100000, 92500, 85000, 70000, 50000])  # Pa
+temp = np.array([288, 282, 276, 268, 253])  # K
+q = np.array([0.012, 0.008, 0.005, 0.002, 0.0005])  # kg/kg
+z_surface = 0.0  # meters
+
+z = hydro(pres, temp, q, z_surface)
+print(f"Geopotential heights: {z} meters")
+
+# Calculate precipitable water
+dp = dpres_plevel(pres)
+pw = prcwater_dp(q, dp)
+print(f"Precipitable water: {pw:.2f} kg/m²")
+```
+
+#### Coriolis Parameter and Vorticity
+
+```python
+from ncl_tools.meteo import coriolis_param, uv2vr_cfd, uv2dv_cfd
+
+# Calculate Coriolis parameter
+latitudes = np.array([0, 30, 45, 60, 90])
+f = coriolis_param(latitudes)
+print(f"Coriolis parameter at {latitudes}°N: {f*1e5:.2f} x 10^-5 s^-1")
+
+# Calculate vorticity and divergence from wind components
+# Example: 2D wind field
+nlat, nlon = 50, 100
+lats = np.linspace(-90, 90, nlat)
+lons = np.linspace(0, 360, nlon, endpoint=False)
+u = np.random.randn(nlat, nlon) * 10
+v = np.random.randn(nlat, nlon) * 10
+
+vorticity = uv2vr_cfd(u, v, lats, lons)
+divergence = uv2dv_cfd(u, v, lats, lons)
+print(f"Vorticity range: {vorticity.min():.2e} to {vorticity.max():.2e} s^-1")
+print(f"Divergence range: {divergence.min():.2e} to {divergence.max():.2e} s^-1")
+```
+
+#### Wet Bulb Temperature
+
+```python
+from ncl_tools.meteo import wetbulb_stull
+
+# Calculate wet bulb temperature using Stull's method
+temp_c = np.array([20, 25, 30, 35])  # Celsius
+rh = np.array([50, 60, 70, 80])      # %
+
+tw = wetbulb_stull(temp_c, rh)
+print("Temp(°C)  RH(%)  Wet Bulb(°C)")
+for t, r, w in zip(temp_c, rh, tw):
+    print(f"  {t:4.0f}     {r:3.0f}      {w:5.1f}")
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -535,6 +702,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL Heat Stress Functions](https://www.ncl.ucar.edu/Document/Functions/heat_stress.shtml)
 - [NCL Extreme Value Functions](https://www.ncl.ucar.edu/Document/Functions/extval.shtml)
 - [NCL Latitude/Longitude Functions](https://www.ncl.ucar.edu/Document/Functions/latlon_funcs.shtml)
+- [NCL Meteorology Functions](https://www.ncl.ucar.edu/Document/Functions/meteo.shtml)
 
 ## License
 
