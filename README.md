@@ -157,6 +157,37 @@ This package implements NCL's printing and output functions:
 - `write_matrix` - Output formatted 2D arrays with Fortran-style format strings
 - `show_ascii` - Display ASCII character table
 
+### Climatology Functions
+
+This package implements comprehensive climatology analysis functions:
+
+**Monthly Climatology:**
+- `clmMonTLL`, `clmMonTLLL`, `clmMonLLT`, `clmMonLLLT` - Compute monthly climatologies
+
+**Daily Climatology:**
+- `clmDayTLL`, `clmDayTLLL` - Compute daily climatologies
+- `clmDayHourTLL`, `clmDayHourTLLL` - Compute day-hour climatologies
+- `clmMon2clmDay` - Convert monthly to daily climatology
+
+**Anomaly Calculations:**
+- `calcMonAnomTLL`, `calcMonAnomTLLL`, `calcMonAnomLLT`, `calcMonAnomLLLT` - Monthly anomalies
+- `calcDayAnomTLL` - Daily anomalies
+
+**Seasonal Means:**
+- `month_to_season` - Compute specific 3-month seasonal mean
+- `month_to_season12` - Compute all 12 seasonal means
+- `month_to_seasonN` - Compute user-specified list of seasonal means
+
+**Annual Cycle Removal:**
+- `rmAnnCycle1D` - Remove annual cycle from 1D time series
+- `rmMonAnnCycTLL`, `rmMonAnnCycLLT`, `rmMonAnnCycLLLT` - Remove annual cycle (multiple dimensions)
+
+**Standard Deviations:**
+- `stdMonTLL`, `stdMonTLLL`, `stdMonLLT`, `stdMonLLLT` - Monthly standard deviations
+
+**Smoothing:**
+- `smthClmDayTLL`, `smthClmDayTLLL` - Smooth daily climatology using FFT
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -1310,6 +1341,244 @@ print("Month    Mean     Std      Min      Max")
 write_matrix(spatial_stats, "i5,4f9.2", False)
 ```
 
+### Climatology Functions
+
+#### Monthly Climatology and Anomalies
+
+```python
+from ncl_tools.climo import clmMonTLL, calcMonAnomTLL, stdMonTLL
+import numpy as np
+
+# Generate sample monthly data: 10 years of monthly data
+nyears = 10
+nmonths = nyears * 12
+nlat, nlon = 50, 100
+
+# Simulate temperature data [time, lat, lon]
+# Add seasonal cycle + trend + noise
+time = np.arange(nmonths)
+seasonal_cycle = 10 * np.sin(2 * np.pi * time / 12)
+trend = 0.02 * time
+noise = np.random.randn(nmonths, nlat, nlon) * 2
+
+temp_data = (15 + seasonal_cycle[:, np.newaxis, np.newaxis] +
+             trend[:, np.newaxis, np.newaxis] + noise)
+
+# Compute monthly climatology (12 months)
+temp_clim = clmMonTLL(temp_data)
+print(f"Climatology shape: {temp_clim.shape}")  # (12, 50, 100)
+print(f"January mean: {temp_clim[0].mean():.2f}°C")
+print(f"July mean: {temp_clim[6].mean():.2f}°C")
+
+# Calculate anomalies (remove seasonal cycle)
+temp_anom = calcMonAnomTLL(temp_data, temp_clim)
+print(f"Anomaly shape: {temp_anom.shape}")  # (120, 50, 100)
+print(f"Mean anomaly (should be ~0): {temp_anom.mean():.6f}")
+
+# Calculate monthly standard deviations
+temp_std = stdMonTLL(temp_data)
+print(f"Std shape: {temp_std.shape}")  # (12, 50, 100)
+print(f"January std: {temp_std[0].mean():.2f}°C")
+```
+
+#### Seasonal Means
+
+```python
+from ncl_tools.climo import month_to_season, month_to_season12
+import numpy as np
+
+# Monthly data
+nmonths = 120  # 10 years
+temp_monthly = np.random.randn(nmonths, 50, 100) * 10 + 15
+
+# Compute DJF (Dec-Jan-Feb) seasonal mean
+djf_mean = month_to_season(temp_monthly, "DJF")
+print(f"DJF shape: {djf_mean.shape}")  # (10, 50, 100) - one per year
+
+# Compute JJA (Jun-Jul-Aug) seasonal mean
+jja_mean = month_to_season(temp_monthly, "JJA")
+print(f"JJA shape: {jja_mean.shape}")  # (10, 50, 100)
+
+# Compute all 12 seasonal means
+all_seasons = month_to_season12(temp_monthly)
+print(f"All seasons shape: {all_seasons.shape}")  # (12, 10, 50, 100)
+
+# Available seasons
+seasons = ['DJF', 'JFM', 'FMA', 'MAM', 'AMJ', 'MJJ',
+           'JJA', 'JAS', 'ASO', 'SON', 'OND', 'NDJ']
+print(f"\nSeasonal means for DJF: {djf_mean[:, 25, 50].mean():.2f}°C")
+print(f"Seasonal means for JJA: {jja_mean[:, 25, 50].mean():.2f}°C")
+```
+
+#### Daily Climatology
+
+```python
+from ncl_tools.climo import clmDayTLL, calcDayAnomTLL, smthClmDayTLL
+import numpy as np
+
+# Generate daily data for multiple years
+nyears = 5
+ndays_per_year = 365
+ndays_total = nyears * ndays_per_year
+nlat, nlon = 30, 60
+
+# Create yyyyddd array (year and day-of-year)
+yyyyddd = []
+for year in range(2015, 2015 + nyears):
+    for doy in range(1, ndays_per_year + 1):
+        yyyyddd.append(year * 1000 + doy)
+yyyyddd = np.array(yyyyddd)
+
+# Simulate daily temperature with annual cycle
+doy_all = yyyyddd % 1000
+seasonal_cycle = 15 * np.sin(2 * np.pi * (doy_all - 80) / 365)
+daily_temp = (15 + seasonal_cycle[:, np.newaxis, np.newaxis] +
+              np.random.randn(ndays_total, nlat, nlon) * 3)
+
+# Compute daily climatology (365 days)
+daily_clim = clmDayTLL(daily_temp, yyyyddd)
+print(f"Daily climatology shape: {daily_clim.shape}")  # (365, 30, 60)
+
+# Smooth the daily climatology using FFT (retain 2 harmonics)
+smooth_clim = smthClmDayTLL(daily_clim, nHarm=2)
+print(f"Smoothed climatology shape: {smooth_clim.shape}")  # (365, 30, 60)
+
+# Calculate daily anomalies
+daily_anom = calcDayAnomTLL(daily_temp, yyyyddd, daily_clim)
+print(f"Daily anomaly shape: {daily_anom.shape}")  # (1825, 30, 60)
+print(f"Mean anomaly: {daily_anom.mean():.6f}")
+
+# Compare day 100 climatology: original vs smoothed
+print(f"\nDay 100 original clim: {daily_clim[99, 15, 30]:.2f}°C")
+print(f"Day 100 smoothed clim: {smooth_clim[99, 15, 30]:.2f}°C")
+```
+
+#### Remove Annual Cycle
+
+```python
+from ncl_tools.climo import rmAnnCycle1D, rmMonAnnCycTLL
+import numpy as np
+
+# 1D time series example
+nmonths = 120  # 10 years
+time = np.arange(nmonths)
+
+# Create time series with annual cycle + trend + noise
+seasonal = 10 * np.sin(2 * np.pi * time / 12)
+trend = 0.03 * time
+noise = np.random.randn(nmonths) * 2
+ts = 15 + seasonal + trend + noise
+
+# Remove annual cycle (leaves trend + noise)
+ts_deseasonalized = rmAnnCycle1D(ts)
+
+print("Original time series statistics:")
+print(f"  Mean: {ts.mean():.2f}")
+print(f"  Std: {ts.std():.2f}")
+print(f"  Range: {ts.min():.2f} to {ts.max():.2f}")
+
+print("\nDeseasonalized time series statistics:")
+print(f"  Mean: {ts_deseasonalized.mean():.2f}")
+print(f"  Std: {ts_deseasonalized.std():.2f}")
+print(f"  Range: {ts_deseasonalized.min():.2f} to {ts_deseasonalized.max():.2f}")
+
+# 3D spatial data example
+temp_3d = np.random.randn(120, 20, 40) * 5 + 15
+for t in range(120):
+    month_idx = t % 12
+    temp_3d[t] += 10 * np.sin(2 * np.pi * month_idx / 12)
+
+# Remove annual cycle from 3D data
+temp_3d_deseason = rmMonAnnCycTLL(temp_3d)
+print(f"\n3D deseasonalized shape: {temp_3d_deseason.shape}")
+print(f"3D deseasonalized mean: {temp_3d_deseason.mean():.6f}")
+```
+
+#### Convert Monthly to Daily Climatology
+
+```python
+from ncl_tools.climo import clmMonTLL, clmMon2clmDay
+import numpy as np
+
+# Monthly climatology
+monthly_clim = np.random.randn(12, 30, 60) * 5 + 15
+
+# Add realistic seasonal cycle to monthly climatology
+for month in range(12):
+    monthly_clim[month] += 10 * np.sin(2 * np.pi * (month - 2) / 12)
+
+print(f"Monthly climatology shape: {monthly_clim.shape}")  # (12, 30, 60)
+
+# Convert to daily climatology (365 days)
+daily_from_monthly = clmMon2clmDay(monthly_clim, nDay=365)
+print(f"Daily climatology shape: {daily_from_monthly.shape}")  # (365, 30, 60)
+
+# Compare mid-month values
+print("\nTemperature at grid point (15, 30):")
+print(f"  January (month 0): {monthly_clim[0, 15, 30]:.2f}°C")
+print(f"  Day 15 (mid-Jan): {daily_from_monthly[14, 15, 30]:.2f}°C")
+print(f"  July (month 6): {monthly_clim[6, 15, 30]:.2f}°C")
+print(f"  Day 196 (mid-Jul): {daily_from_monthly[195, 15, 30]:.2f}°C")
+```
+
+#### Complete Climate Analysis Workflow
+
+```python
+from ncl_tools.climo import (clmMonTLL, calcMonAnomTLL, stdMonTLL,
+                              month_to_season, rmMonAnnCycTLL)
+from ncl_tools.printing import printMinMax
+import numpy as np
+
+# Simulate 30 years of monthly SST data
+nyears = 30
+nmonths = nyears * 12
+sst = np.random.randn(nmonths, 89, 180) * 2 + 20
+
+# Add ENSO-like variability
+enso_pattern = np.outer(np.ones(89), np.sin(np.linspace(0, 2*np.pi, 180)))
+enso_ts = np.sin(2 * np.pi * np.arange(nmonths) / 48)  # 4-year cycle
+for t in range(nmonths):
+    sst[t] += enso_pattern * enso_ts[t] * 2
+
+print("="*60)
+print("CLIMATE ANALYSIS WORKFLOW")
+print("="*60)
+
+# 1. Compute monthly climatology
+print("\n1. Computing monthly climatology...")
+sst_clim = clmMonTLL(sst)
+printMinMax(sst_clim[0], True, "January SST climatology")
+printMinMax(sst_clim[6], False, "July SST climatology")
+
+# 2. Compute anomalies
+print("\n2. Computing monthly anomalies...")
+sst_anom = calcMonAnomTLL(sst, sst_clim)
+printMinMax(sst_anom[0], True, "SST anomalies (month 0)")
+
+# 3. Compute monthly standard deviations
+print("\n3. Computing monthly standard deviations...")
+sst_std = stdMonTLL(sst)
+print(f"January std: {sst_std[0].mean():.2f}°C")
+print(f"July std: {sst_std[6].mean():.2f}°C")
+
+# 4. Compute seasonal means
+print("\n4. Computing seasonal means...")
+djf = month_to_season(sst, "DJF")
+jja = month_to_season(sst, "JJA")
+print(f"DJF mean SST: {djf.mean():.2f}°C")
+print(f"JJA mean SST: {jja.mean():.2f}°C")
+print(f"DJF-JJA difference: {(djf.mean() - jja.mean()):.2f}°C")
+
+# 5. Remove annual cycle
+print("\n5. Removing annual cycle...")
+sst_deseason = rmMonAnnCycTLL(sst)
+print(f"Original SST range: {sst.min():.2f} to {sst.max():.2f}°C")
+print(f"Deseasonalized range: {sst_deseason.min():.2f} to {sst_deseason.max():.2f}°C")
+print(f"Variance reduction: {(1 - sst_deseason.var()/sst.var())*100:.1f}%")
+
+print("="*60)
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -1334,6 +1603,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL Statistics Functions](https://www.ncl.ucar.edu/Document/Functions/statistics.shtml)
 - [NCL EOF Functions](https://www.ncl.ucar.edu/Document/Functions/eofs.shtml)
 - [NCL Printing Functions](https://www.ncl.ucar.edu/Document/Functions/printing.shtml)
+- [NCL Climatology Functions](https://www.ncl.ucar.edu/Document/Functions/climo.shtml)
 
 ## License
 
