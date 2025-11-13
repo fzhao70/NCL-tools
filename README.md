@@ -188,6 +188,22 @@ This package implements comprehensive climatology analysis functions:
 **Smoothing:**
 - `smthClmDayTLL`, `smthClmDayTLLL` - Smooth daily climatology using FFT
 
+### RIP (Read/Interpolate/Plot) Functions
+
+This package implements NCL's RIP functions for severe weather analysis:
+
+**CAPE/CIN Calculations:**
+- `wrf_cape_2d` - Calculate CAPE, CIN, LCL, and LFC (current version)
+- `wrf_cape_3d` - Calculate CAPE and CIN for 3D domain (current version)
+- `rip_cape_2d` - Calculate CAPE, CIN, LCL, and LFC (deprecated, use wrf_cape_2d)
+- `rip_cape_3d` - Calculate CAPE and CIN (deprecated, use wrf_cape_3d)
+
+**Computed Parameters:**
+- CAPE: Convective Available Potential Energy (J/kg)
+- CIN: Convective Inhibition (J/kg)
+- LCL: Lifted Condensation Level (m AGL)
+- LFC: Level of Free Convection (m AGL)
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -1579,6 +1595,198 @@ print(f"Variance reduction: {(1 - sst_deseason.var()/sst.var())*100:.1f}%")
 print("="*60)
 ```
 
+### RIP Functions - CAPE/CIN Calculations
+
+#### Calculate CAPE and CIN for Severe Weather Forecasting
+
+```python
+from ncl_tools.rip import wrf_cape_2d, wrf_cape_3d
+import numpy as np
+
+# Simulate atmospheric sounding data
+# In real applications, this would come from model output or observations
+
+nlev = 30  # Number of vertical levels
+nlat, nlon = 50, 100
+
+# Create pressure levels (Pa) - surface to top of atmosphere
+p_levels = np.linspace(100000, 10000, nlev)  # 1000 hPa to 100 hPa
+
+# Create 3D arrays [lev, lat, lon]
+p_3d = np.tile(p_levels[:, np.newaxis, np.newaxis], (1, nlat, nlon))
+
+# Temperature (K) - decreasing with height
+# Typical atmospheric lapse rate: ~6.5 K/km
+t_3d = np.zeros((nlev, nlat, nlon))
+for k in range(nlev):
+    # Surface temp ~295K, decreasing with pressure
+    t_3d[k, :, :] = 295.0 - (100000 - p_levels[k]) / 10000.0 * 6.5
+
+# Add some spatial variability (warmer in south)
+for ilat in range(nlat):
+    t_3d[:, ilat, :] += (nlat/2 - ilat) * 0.1
+
+# Water vapor mixing ratio (kg/kg)
+# Higher near surface, decreasing with height
+q_3d = np.zeros((nlev, nlat, nlon))
+for k in range(nlev):
+    # Exponential decrease with height
+    q_3d[k, :, :] = 0.014 * np.exp(-(100000 - p_levels[k]) / 25000.0)
+
+# Geopotential height (m)
+# Approximate using hypsometric equation
+z_3d = np.zeros((nlev, nlat, nlon))
+z_base = 0.0
+for k in range(nlev-1, -1, -1):
+    if k == nlev - 1:
+        z_3d[k, :, :] = z_base
+    else:
+        # dz = -R*T/g * dp/p
+        dp = p_levels[k+1] - p_levels[k]
+        t_avg = (t_3d[k, :, :] + t_3d[k+1, :, :]) / 2
+        dz = -287.04 * t_avg / 9.81 * dp / ((p_levels[k] + p_levels[k+1]) / 2)
+        z_3d[k, :, :] = z_3d[k+1, :, :] + dz
+
+# Surface conditions
+zsfc = np.zeros((nlat, nlon))  # Flat terrain
+psfc = np.full((nlat, nlon), 1013.25)  # 1013.25 hPa (sea level)
+
+print("="*70)
+print("CAPE/CIN CALCULATION FOR SEVERE WEATHER ANALYSIS")
+print("="*70)
+
+# Calculate CAPE, CIN, LCL, and LFC for entire domain
+result_2d = wrf_cape_2d(p_3d, t_3d, q_3d, z_3d, zsfc, psfc, opt=False)
+
+cape = result_2d[0]  # Convective Available Potential Energy (J/kg)
+cin = result_2d[1]   # Convective Inhibition (J/kg)
+lcl = result_2d[2]   # Lifted Condensation Level (m AGL)
+lfc = result_2d[3]   # Level of Free Convection (m AGL)
+
+print(f"\nDomain Statistics:")
+print(f"  CAPE - Mean: {np.nanmean(cape):.1f} J/kg, Max: {np.nanmax(cape):.1f} J/kg")
+print(f"  CIN  - Mean: {np.nanmean(cin):.1f} J/kg, Max: {np.nanmax(cin):.1f} J/kg")
+print(f"  LCL  - Mean: {np.nanmean(lcl):.1f} m AGL")
+print(f"  LFC  - Mean: {np.nanmean(lfc):.1f} m AGL")
+
+# Identify severe weather potential areas
+# High CAPE (>2000 J/kg) indicates strong thunderstorm potential
+# Low CIN (<50 J/kg) indicates storms can easily develop
+severe_potential = (cape > 2000) & (cin < 50)
+n_severe = np.sum(severe_potential)
+
+print(f"\nSevere Weather Analysis:")
+print(f"  Grid points with CAPE > 2000 J/kg: {np.sum(cape > 2000)}")
+print(f"  Grid points with CIN < 50 J/kg: {np.sum(cin < 50)}")
+print(f"  Grid points with severe potential: {n_severe}")
+
+# CAPE categories for severe weather
+weak_instability = (cape > 0) & (cape <= 1000)
+moderate_instability = (cape > 1000) & (cape <= 2500)
+strong_instability = (cape > 2500) & (cape <= 4000)
+extreme_instability = cape > 4000
+
+print(f"\nInstability Classification:")
+print(f"  Weak (0-1000 J/kg): {np.sum(weak_instability)} points")
+print(f"  Moderate (1000-2500 J/kg): {np.sum(moderate_instability)} points")
+print(f"  Strong (2500-4000 J/kg): {np.sum(strong_instability)} points")
+print(f"  Extreme (>4000 J/kg): {np.sum(extreme_instability)} points")
+
+# Calculate CAPE/CIN only (faster, for 3D analysis)
+result_3d = wrf_cape_3d(p_3d, t_3d, q_3d, z_3d, zsfc, psfc, opt=False)
+
+cape_3d = result_3d[0]
+cin_3d = result_3d[1]
+
+print(f"\n3D Analysis (CAPE/CIN only):")
+print(f"  CAPE shape: {cape_3d.shape}")
+print(f"  Mean CAPE: {np.nanmean(cape_3d):.1f} J/kg")
+print(f"  Mean CIN: {np.nanmean(cin_3d):.1f} J/kg")
+
+print("="*70)
+```
+
+#### Single Column Sounding Analysis
+
+```python
+from ncl_tools.rip import wrf_cape_2d
+import numpy as np
+
+# Single atmospheric sounding (e.g., from radiosonde)
+print("\n" + "="*70)
+print("SINGLE SOUNDING CAPE/CIN ANALYSIS")
+print("="*70)
+
+# Pressure levels (Pa)
+p_sounding = np.array([
+    100000, 97500, 95000, 92500, 90000, 87500, 85000, 82500, 80000,
+    77500, 75000, 70000, 65000, 60000, 55000, 50000, 45000, 40000,
+    35000, 30000, 25000, 20000, 15000, 10000
+])
+
+# Temperature (K) - typical summer sounding with strong instability
+t_sounding = np.array([
+    298.15, 296.15, 294.15, 292.15, 290.15, 288.15, 286.15, 284.15, 282.15,
+    280.15, 278.15, 274.15, 270.15, 266.15, 262.15, 258.15, 254.15, 250.15,
+    245.15, 239.15, 232.15, 224.15, 215.15, 205.15
+])
+
+# Mixing ratio (kg/kg) - moist boundary layer
+q_sounding = np.array([
+    0.016, 0.015, 0.014, 0.013, 0.012, 0.011, 0.010, 0.009, 0.008,
+    0.007, 0.006, 0.005, 0.004, 0.003, 0.002, 0.0015, 0.001, 0.0008,
+    0.0005, 0.0003, 0.0002, 0.0001, 0.00005, 0.00002
+])
+
+# Heights (m) - approximate
+z_sounding = np.array([
+    100, 350, 600, 850, 1100, 1350, 1600, 1850, 2100,
+    2350, 2600, 3100, 3600, 4100, 4600, 5100, 5650, 6200,
+    6800, 7450, 8200, 9100, 10200, 11500
+])
+
+# Surface conditions
+zsfc_single = 100.0  # m
+psfc_single = 1013.25  # hPa
+
+# Calculate CAPE/CIN
+result = wrf_cape_2d(p_sounding, t_sounding, q_sounding, z_sounding,
+                     zsfc_single, psfc_single, opt=False)
+
+print(f"\nSounding Results:")
+print(f"  CAPE: {result[0]:.1f} J/kg")
+print(f"  CIN:  {result[1]:.1f} J/kg")
+print(f"  LCL:  {result[2]:.1f} m AGL")
+print(f"  LFC:  {result[3]:.1f} m AGL")
+
+# Interpret results
+if result[0] > 3000:
+    instability = "EXTREME - Violent thunderstorms possible"
+elif result[0] > 2000:
+    instability = "STRONG - Severe thunderstorms likely"
+elif result[0] > 1000:
+    instability = "MODERATE - Thunderstorms possible"
+elif result[0] > 500:
+    instability = "WEAK - Limited convection"
+else:
+    instability = "STABLE - No significant convection"
+
+print(f"\nInstability: {instability}")
+
+if result[1] < 25:
+    cap_strength = "WEAK - Easy storm initiation"
+elif result[1] < 75:
+    cap_strength = "MODERATE - Storms need trigger"
+elif result[1] < 150:
+    cap_strength = "STRONG - Significant cap"
+else:
+    cap_strength = "VERY STRONG - Storm development unlikely"
+
+print(f"Cap strength: {cap_strength}")
+
+print("="*70)
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -1604,6 +1812,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL EOF Functions](https://www.ncl.ucar.edu/Document/Functions/eofs.shtml)
 - [NCL Printing Functions](https://www.ncl.ucar.edu/Document/Functions/printing.shtml)
 - [NCL Climatology Functions](https://www.ncl.ucar.edu/Document/Functions/climo.shtml)
+- [NCL RIP Functions](https://www.ncl.ucar.edu/Document/Functions/rip.shtml)
 
 ## License
 
