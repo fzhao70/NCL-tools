@@ -4,7 +4,7 @@ Python implementation of NCL (NCAR Command Language) functions using NumPy.
 
 ## Overview
 
-This package provides pure Python implementations of various NCL functions, focusing on heat stress, extreme value statistics, and meteorological calculations. All functions are implemented using NumPy and SciPy, making them fast and easy to integrate into existing scientific Python workflows.
+This package provides pure Python implementations of various NCL functions, focusing on heat stress, extreme value statistics, latitude/longitude operations, and meteorological calculations. All functions are implemented using NumPy and SciPy, making them fast and easy to integrate into existing scientific Python workflows.
 
 ## Installation
 
@@ -60,6 +60,32 @@ This package implements all NCL extreme value statistics functions:
 - `extval_recurrence_table` - Recurrence intervals and probabilities
 - `extval_return_period` - Return period calculations
 - `extval_return_prob` - Return probability calculations
+
+### Latitude/Longitude Functions
+
+This package implements commonly used NCL latitude/longitude and spherical geometry functions:
+
+**Grid Generation:**
+- `gaus` - Compute Gaussian latitudes and weights
+- `latGlobeF`, `lonGlobeF` - Generate global fixed grids with metadata
+- `latGlobeFo`, `lonGlobeFo` - Generate global fixed offset grids
+- `latRegWgt` - Generate area weights for regular grids
+- `NormCosWgtGlobe` - Create normalized cosine weights
+
+**Great Circle Functions:**
+- `gc_latlon` - Great circle distance and interpolation
+- `gc_qarea` - Area of spherical quadrilaterals
+- `gc_tarea` - Area of spherical triangles
+- `area_poly_sphere` - Area of arbitrary spherical polygons
+- `gc_clkwise` - Test clockwise ordering of polygon vertices
+- `gc_inout` - Test if points are inside spherical polygons
+
+**Grid Utilities:**
+- `lonFlip` - Reorder longitude arrays (0-360 to -180-180)
+- `lonPivot` - Pivot arrays about specified longitude
+- `add90LatX`, `add90LatY` - Add polar points to arrays
+- `getind_latlon2d` - Find nearest grid point indices
+- `region_ind` - Find indices spanning a geographic region
 
 ## Usage Examples
 
@@ -361,6 +387,134 @@ prob = extval_return_prob(avg_interval, exceedance_period)
 print(f"Probability: {prob:.4f} or {prob*100:.2f}%")
 ```
 
+### Latitude/Longitude Examples
+
+#### Gaussian Latitudes and Weights
+
+```python
+import numpy as np
+from ncl_tools.latlon import gaus
+
+# Generate Gaussian latitudes for T42 resolution (64 latitudes)
+nlat_per_hem = 32
+gau_info = gaus(nlat_per_hem)
+
+latitudes = gau_info[:, 0]  # Gaussian latitudes
+weights = gau_info[:, 1]     # Gaussian weights
+
+print(f"Number of latitudes: {len(latitudes)}")
+print(f"First 5 latitudes: {latitudes[:5]}")
+print(f"Weights sum to: {np.sum(weights):.6f}")  # Should be ~2.0
+```
+
+#### Generate Global Grids
+
+```python
+from ncl_tools.latlon import latGlobeF, lonGlobeF, latRegWgt
+
+# Create a 2.5° x 2.5° global grid
+nlat = 72
+nlon = 144
+
+lat_info = latGlobeF(nlat, "lat", "latitude", "degrees_north")
+lon_info = lonGlobeF(nlon, "lon", "longitude", "degrees_east")
+
+lats = lat_info['values']  # -90 to 90
+lons = lon_info['values']  # 0 to 360
+
+# Calculate area weights
+weights = latRegWgt(lats)
+print(f"Latitude weights sum to: {np.sum(weights):.6f}")  # Should be 2.0
+```
+
+#### Great Circle Distance and Interpolation
+
+```python
+from ncl_tools.latlon import gc_latlon
+
+# Calculate distance from New York to London
+lat1, lon1 = 40.7128, -74.0060  # New York
+lat2, lon2 = 51.5074, -0.1278    # London
+
+result = gc_latlon(lat1, lon1, lat2, lon2, npts=10, iu=4)
+
+print(f"Great circle distance: {result['distance']:.2f} km")
+print(f"Interpolated latitudes: {result['gclat']}")
+print(f"Interpolated longitudes: {result['gclon']}")
+```
+
+#### Calculate Polygon Area on Sphere
+
+```python
+from ncl_tools.latlon import area_poly_sphere, gc_clkwise
+
+# Define a polygon (e.g., a rectangular region)
+lat_poly = np.array([30, 30, 40, 40])
+lon_poly = np.array([-100, -90, -90, -100])
+
+# Check if vertices are in clockwise order
+is_clockwise = gc_clkwise(lat_poly, lon_poly)
+print(f"Clockwise order: {is_clockwise}")
+
+# Calculate area (Earth radius in km)
+R_earth = 6371.0
+area = area_poly_sphere(lat_poly, lon_poly, R_earth)
+print(f"Polygon area: {area:.2f} km²")
+```
+
+#### Longitude Grid Manipulation
+
+```python
+from ncl_tools.latlon import lonFlip, lonPivot
+
+# Sample data on 0-360 longitude grid
+data = np.random.rand(72, 144)  # (lat, lon)
+
+# Flip to -180 to 180 longitude
+data_flipped = lonFlip(data)
+
+# Pivot about 90°E
+data_pivoted = lonPivot(data, 90.0)
+```
+
+#### Find Nearest Grid Point
+
+```python
+from ncl_tools.latlon import getind_latlon2d, region_ind
+
+# 2D lat/lon arrays (e.g., from curvilinear grid)
+lat2d = np.random.uniform(-90, 90, (100, 120))
+lon2d = np.random.uniform(0, 360, (100, 120))
+
+# Find nearest point to specific location
+target_lat, target_lon = 35.0, -105.0
+i, j = getind_latlon2d(lat2d, lon2d, target_lat, target_lon)
+print(f"Nearest grid point at indices: ({i}, {j})")
+
+# Find region spanning lat/lon box
+indices = region_ind(lat2d, lon2d, latS=20, latN=50, lonW=-120, lonE=-80)
+if indices:
+    j_south, j_north, i_west, i_east = indices
+    print(f"Region spans: j={j_south}:{j_north}, i={i_west}:{i_east}")
+```
+
+#### Test Point in Polygon
+
+```python
+from ncl_tools.latlon import gc_inout
+
+# Define polygon (triangle around equator)
+lat_poly = np.array([0, 10, 0])
+lon_poly = np.array([0, 5, 10])
+
+# Test points
+test_lats = np.array([2, 5, 15])
+test_lons = np.array([5, 5, 5])
+
+inside = gc_inout(test_lats, test_lons, lat_poly, lon_poly)
+print(f"Points inside polygon: {inside}")  # [True, True, False]
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -380,6 +534,7 @@ Most functions use an `iounit` parameter to specify input/output units:
 All functions are based on NCL implementations and follow the same algorithms and formulas. For more details, see:
 - [NCL Heat Stress Functions](https://www.ncl.ucar.edu/Document/Functions/heat_stress.shtml)
 - [NCL Extreme Value Functions](https://www.ncl.ucar.edu/Document/Functions/extval.shtml)
+- [NCL Latitude/Longitude Functions](https://www.ncl.ucar.edu/Document/Functions/latlon_funcs.shtml)
 
 ## License
 
