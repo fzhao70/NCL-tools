@@ -127,6 +127,27 @@ This package implements commonly used NCL statistics functions:
 - `taylor_stats` - Taylor diagram statistics
 - `bin_avg`, `bin_sum` - Binning operations
 
+### EOF (Empirical Orthogonal Function) Functions
+
+This package implements comprehensive EOF/PCA analysis tools:
+
+**Core EOF Functions:**
+- `eofunc` - Compute EOFs (Principal Component Analysis)
+- `eofunc_n` - EOF computation with specified time dimension
+- `eofunc_ts` - Calculate time series amplitudes (principal components)
+- `eofunc_ts_n` - Time series with specified dimension
+- `eofcov`, `eofcov_ts` - Covariance-based EOF analysis
+- `eofcor`, `eofcor_ts` - Correlation-based EOF analysis
+
+**Reconstruction:**
+- `eof2data` - Reconstruct data from EOFs and time series
+- `eof2data_n` - Reconstruction with specified dimension
+
+**Rotation and Testing:**
+- `eofunc_varimax` - Varimax rotation for localized patterns
+- `eofunc_varimax_reorder` - Reorder rotated EOFs by variance
+- `eofunc_north` - Test eigenvalue significance (North et al. 1982)
+
 ### Latitude/Longitude Functions
 
 This package implements commonly used NCL latitude/longitude and spherical geometry functions:
@@ -943,6 +964,195 @@ print(f"Mean effective n: {np.mean(n_eff):.1f}")
 print(f"Actual sample size: {time_series.shape[0]}")
 ```
 
+### EOF (Empirical Orthogonal Function) Analysis
+
+This module provides comprehensive EOF/PCA analysis tools for climate and meteorological data.
+
+#### Basic EOF Computation
+
+```python
+from ncl_tools.eofs import eofunc, eofunc_ts, eof2data
+import numpy as np
+
+# Create sample climate data: [lat, lon, time]
+nlat, nlon, ntime = 50, 100, 120
+data = np.random.randn(nlat, nlon, ntime)
+
+# Add a pattern to make it more realistic
+pattern = np.outer(np.sin(np.linspace(0, np.pi, nlat)),
+                   np.cos(np.linspace(0, 2*np.pi, nlon)))
+time_series = np.sin(np.linspace(0, 4*np.pi, ntime))
+data += pattern[:, :, np.newaxis] * time_series[np.newaxis, np.newaxis, :]
+
+# Compute first 3 EOFs
+neval = 3
+eofs = eofunc(data, neval, optEOF=0)  # 0 for covariance, 1 for correlation
+
+print(f"EOF shape: {eofs.shape}")  # (50, 100, 3)
+print(f"Eigenvalues: {eofs.eval}")
+print(f"Percent variance: {eofs.pcvar}")
+print(f"Matrix type: {eofs.matrix}")
+
+# Calculate time series (principal components)
+pcs = eofunc_ts(data, eofs, optETS=0)
+print(f"PC shape: {pcs.shape}")  # (3, 120)
+
+# Reconstruct data from EOFs
+reconstructed = eof2data(eofs, pcs)
+
+# Add back the mean if needed
+if hasattr(pcs, 'ts_mean'):
+    # ts_mean was subtracted during calculation
+    for i in range(neval):
+        reconstructed[..., i] += pcs.ts_mean[i]
+
+print(f"Reconstructed shape: {reconstructed.shape}")  # (50, 100, 120)
+```
+
+#### EOF with Non-Standard Time Dimension
+
+```python
+from ncl_tools.eofs import eofunc_n, eofunc_ts_n, eof2data_n
+
+# Data with time as first dimension: [time, lat, lon]
+data_time_first = np.random.randn(120, 50, 100)
+
+# Compute EOFs specifying time dimension
+neval = 3
+eofs = eofunc_n(data_time_first, neval, optEOF=0, time_dim=0)
+print(f"EOF shape: {eofs.shape}")  # (3, 50, 100) - time dim replaced by neval
+
+# Calculate time series
+pcs = eofunc_ts_n(data_time_first, eofs, optETS=0, time_dim=0)
+print(f"PC shape: {pcs.shape}")  # (3, 120)
+
+# Reconstruct data
+reconstructed = eof2data_n(eofs, pcs, time_dim=0)
+print(f"Reconstructed shape: {reconstructed.shape}")  # (120, 50, 100)
+```
+
+#### Testing Eigenvalue Significance
+
+```python
+from ncl_tools.eofs import eofunc, eofunc_north
+
+# Compute EOFs
+data = np.random.randn(50, 100, 200)  # 200 time steps
+neval = 5
+eofs = eofunc(data, neval, optEOF=0)
+
+# Test if eigenvalues are significantly separated (North et al. 1982)
+N = 200  # Number of time steps
+is_separated = eofunc_north(eofs.eval, N, prinfo=True)
+
+print("\nSignificant modes:")
+for i, sig in enumerate(is_separated):
+    if sig:
+        print(f"  Mode {i+1}: {eofs.pcvar[i]:.2f}% variance")
+```
+
+#### Covariance vs Correlation EOFs
+
+```python
+from ncl_tools.eofs import eofcov, eofcor, eofcov_ts, eofcor_ts
+
+# Data with different scales (e.g., temperature and precipitation)
+data = np.random.randn(50, 100, 120) * 10  # Large values
+
+# Covariance-based EOF (sensitive to variable magnitude)
+eofs_cov = eofcov(data, neval=3)
+print(f"Covariance EOF trace: {eofs_cov.trace:.2f}")
+print(f"Covariance pcvar: {eofs_cov.pcvar}")
+
+# Correlation-based EOF (normalizes variables first)
+eofs_cor = eofcor(data, neval=3)
+print(f"Correlation EOF trace: {eofs_cor.trace:.2f}")
+print(f"Correlation pcvar: {eofs_cor.pcvar}")
+
+# Calculate corresponding time series
+pcs_cov = eofcov_ts(data, eofs_cov)
+pcs_cor = eofcor_ts(data, eofs_cor)
+
+print(f"Covariance PC shape: {pcs_cov.shape}")
+print(f"Correlation PC shape: {pcs_cor.shape}")
+```
+
+#### Varimax Rotation
+
+```python
+from ncl_tools.eofs import eofunc, eofunc_varimax, eofunc_varimax_reorder
+
+# Compute standard EOFs
+data = np.random.randn(50, 100, 120)
+neval = 5
+eofs = eofunc(data, neval, optEOF=0)
+
+print("Original EOF variance:")
+print(eofs.pcvar)
+
+# Apply varimax rotation for more localized patterns
+rotated_eofs = eofunc_varimax(eofs, optEVX=1)
+print("\nRotated EOF variance (may not be in order):")
+print(rotated_eofs.pcvar_varimax)
+
+# Reorder by descending variance
+reordered_eofs = eofunc_varimax_reorder(rotated_eofs)
+print("\nReordered rotated EOF variance:")
+print(reordered_eofs.pcvar_varimax)
+```
+
+#### Real-World Example: Sea Surface Temperature
+
+```python
+from ncl_tools.eofs import eofunc, eofunc_ts, eofunc_north
+import numpy as np
+
+# Simulate SST anomaly data: [lat, lon, months]
+# Real data would come from netCDF files
+nlat, nlon, nmonths = 89, 180, 600  # 50 years of monthly data
+
+# Generate synthetic SST with ENSO-like pattern
+lat = np.linspace(-88, 88, nlat)
+lon = np.linspace(0, 359, nlon)
+
+# Create ENSO pattern in tropical Pacific
+enso_pattern = np.zeros((nlat, nlon))
+tropical_mask = (lat > -20) & (lat < 20)
+pacific_mask = (lon > 120) & (lon < 280)
+for i in range(nlat):
+    for j in range(nlon):
+        if tropical_mask[i] and pacific_mask[j]:
+            enso_pattern[i, j] = np.cos((lon[j] - 200) / 40) * \
+                                 np.cos(lat[i] / 10)
+
+# Generate time series with ENSO-like variability
+enso_ts = np.sin(2 * np.pi * np.arange(nmonths) / 48)  # ~4 year cycle
+noise = np.random.randn(nlat, nlon, nmonths) * 0.5
+
+sst_anomalies = enso_pattern[:, :, np.newaxis] * enso_ts + noise
+
+# Compute EOFs
+neval = 3
+eofs = eofunc(sst_anomalies, neval, optEOF=0)
+
+print(f"SST EOF Analysis Results:")
+print(f"  EOF 1: {eofs.pcvar[0]:.1f}% variance (likely ENSO)")
+print(f"  EOF 2: {eofs.pcvar[1]:.1f}% variance")
+print(f"  EOF 3: {eofs.pcvar[2]:.1f}% variance")
+
+# Get principal components
+pcs = eofunc_ts(sst_anomalies, eofs, optETS=0)
+
+# Test significance
+is_separated = eofunc_north(eofs.eval, nmonths, prinfo=False)
+print(f"\nMode 1 significant: {is_separated[0]}")
+print(f"Mode 2 significant: {is_separated[1]}")
+
+# EOF 1 pattern would show ENSO-like structure in tropical Pacific
+print(f"\nEOF 1 pattern shape: {eofs[..., 0].shape}")
+print(f"PC 1 time series shape: {pcs[0].shape}")
+```
+
 ## Unit Specifications
 
 Most functions use an `iounit` parameter to specify input/output units:
@@ -965,6 +1175,7 @@ All functions are based on NCL implementations and follow the same algorithms an
 - [NCL Latitude/Longitude Functions](https://www.ncl.ucar.edu/Document/Functions/latlon_funcs.shtml)
 - [NCL Meteorology Functions](https://www.ncl.ucar.edu/Document/Functions/meteo.shtml)
 - [NCL Statistics Functions](https://www.ncl.ucar.edu/Document/Functions/statistics.shtml)
+- [NCL EOF Functions](https://www.ncl.ucar.edu/Document/Functions/eofs.shtml)
 
 ## License
 
