@@ -782,7 +782,7 @@ anomalies = dim_rmvmean_n(data, 0)
 print(f"Mean of anomalies: {np.mean(anomalies):.10f}")  # Close to 0
 
 # Standardize data (remove mean and divide by std)
-standardized = dim_standardize_n(data, 0, opt=1)
+standardized = dim_standardize_n(data, 1, 0)  # opt=1 uses population std
 print(f"Mean: {np.mean(dim_avg_n(standardized, 0)):.10f}")  # ~0
 print(f"Std: {np.mean(dim_stddev_n(standardized, 0)):.6f}")  # ~1
 ```
@@ -852,8 +852,8 @@ print(f"Mean after detrending: {np.mean(dim_avg_n(data_detrended, 0)):.10f}")
 data_with_nan = data.copy()
 data_with_nan[data_with_nan > 2] = np.nan  # Add some missing values
 
-detrended_nan = dtrend_msg_n(data_with_nan, x=None, return_info=False,
-                               iopt=1, dim=0)
+detrended_nan = dtrend_msg_n(None, data_with_nan, True, False, 0)
+# x, y, remove_mean, return_info, dim
 print(f"Detrended with NaN shape: {detrended_nan.shape}")
 ```
 
@@ -865,16 +865,16 @@ from ncl_tools.statistics import ttest, ftest, student_t
 # T-test: Compare two sample means
 sample1_mean = 10.5
 sample1_var = 2.3
-sample1_n = 30
+sample1_s = 30  # Number of statistically independent observations
 
 sample2_mean = 11.2
 sample2_var = 2.8
-sample2_n = 35
+sample2_s = 35
 
-# Assuming equal variances
-prob = ttest(sample1_mean, sample1_var, sample1_n,
-             sample2_mean, sample2_var, sample2_n,
-             iflag=True, tval_opt=False)
+# Assuming equal variances (iflag=False)
+prob = ttest(sample1_mean, sample1_var, sample1_s,
+             sample2_mean, sample2_var, sample2_s,
+             iflag=False, tval_opt=False)
 print(f"T-test probability: {prob:.4f}")
 if prob < 0.05:
     print("Difference is statistically significant at 95% level")

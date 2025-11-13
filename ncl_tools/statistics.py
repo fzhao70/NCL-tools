@@ -322,7 +322,7 @@ def dim_rmvmed_n(x, dims):
     return x - median
 
 
-def dim_standardize_n(x, dims, opt):
+def dim_standardize_n(x, opt, dims):
     """
     Standardize (normalize) data over specified dimensions.
 
@@ -330,15 +330,22 @@ def dim_standardize_n(x, dims, opt):
     ----------
     x : array_like
         Input array of any dimensionality
+    opt : int
+        Option for standard deviation calculation:
+        - opt=1: use population std (divide by N)
+        - opt=0 or other: use sample std (divide by N-1)
     dims : int or array_like
         Dimension(s) to standardize over
-    opt : int
-        Option: 0=remove mean, 1=remove mean and divide by stddev
 
     Returns
     -------
     ndarray
         Standardized array (same shape as input)
+
+    Notes
+    -----
+    This function removes the mean and divides by standard deviation.
+    The opt parameter only controls which std calculation to use.
 
     References
     ----------
@@ -353,10 +360,11 @@ def dim_standardize_n(x, dims, opt):
     mean = np.mean(x, axis=dims_tuple, keepdims=True)
     result = x - mean
 
-    if opt == 1:
-        # Also divide by standard deviation
-        std = np.std(x, axis=dims_tuple, ddof=1, keepdims=True)
-        result = result / std
+    # Divide by standard deviation
+    # opt=1: population std (ddof=0), otherwise sample std (ddof=1)
+    ddof = 0 if opt == 1 else 1
+    std = np.std(x, axis=dims_tuple, ddof=ddof, keepdims=True)
+    result = result / std
 
     return result
 
@@ -774,27 +782,34 @@ def dtrend_n(y, return_info, dim):
         return detrended
 
 
-def dtrend_msg_n(y, x, return_info, iopt, dim):
+def dtrend_msg_n(x, y, remove_mean, return_info, dim):
     """
     Estimate and remove least squares linear trend (missing values allowed).
 
     Parameters
     ----------
+    x : array_like
+        One-dimensional coordinate array (e.g., time). If equally spaced,
+        can be generated internally by passing None and using iota.
     y : array_like
         Input array (may contain missing values as NaN)
-    x : array_like or None
-        Coordinate array (None for equally spaced)
+    remove_mean : bool
+        If True: remove mean from detrended output
+        If False: do not remove mean (return with mean intact)
     return_info : bool
         If True, attach slope and y_intercept as attributes
-    iopt : int
-        Option: 0=remove trend only, 1=remove trend and mean
     dim : int
-        Dimension to detrend along
+        Dimension of y to detrend along
 
     Returns
     -------
     ndarray
         Detrended array (same shape as input)
+
+    Notes
+    -----
+    If x is None, assumes equally spaced coordinates.
+    Missing values (NaN) are handled appropriately.
 
     References
     ----------
@@ -852,8 +867,8 @@ def dtrend_msg_n(y, x, return_info, iopt, dim):
         trend = slope * x + y_intercept
         detrended = y_slice - trend
 
-        if iopt == 1:
-            # Also remove mean
+        if remove_mean:
+            # Also remove mean if requested
             detrended = detrended - np.nanmean(detrended)
 
         result[idx] = detrended
@@ -882,7 +897,7 @@ def dtrend_msg_n(y, x, return_info, iopt, dim):
 # STATISTICAL TESTS
 # ==============================================================================
 
-def ttest(ave1, var1, n1, ave2, var2, n2, iflag, tval_opt):
+def ttest(ave1, var1, s1, ave2, var2, s2, iflag, tval_opt):
     """
     Perform Student's t-test.
 
@@ -892,23 +907,26 @@ def ttest(ave1, var1, n1, ave2, var2, n2, iflag, tval_opt):
         Mean of first sample
     var1 : float or array_like
         Variance of first sample
-    n1 : int or array_like
-        Sample size of first sample
+    s1 : int or array_like
+        Number of statistically independent observations in first sample
     ave2 : float or array_like
         Mean of second sample
     var2 : float or array_like
         Variance of second sample
-    n2 : int or array_like
-        Sample size of second sample
+    s2 : int or array_like
+        Number of statistically independent observations in second sample
     iflag : bool or int
-        If True/1: assume equal variances, if False/0: assume unequal variances
+        If False/0: assume equal variances (pooled variance)
+        If True/1: assume unequal variances (Welch's t-test)
     tval_opt : bool or int
-        If True/1: return t-value, if False/0: return probability
+        If True/1: return both probability and t-value
+        If False/0: return probability only
 
     Returns
     -------
-    float or ndarray
-        Either t-value or probability depending on tval_opt
+    float or ndarray or tuple
+        If tval_opt=False: probability only
+        If tval_opt=True: (probability, t-value)
 
     Notes
     -----
@@ -922,31 +940,33 @@ def ttest(ave1, var1, n1, ave2, var2, n2, iflag, tval_opt):
     ave2 = np.asarray(ave2, dtype=np.float64)
     var1 = np.asarray(var1, dtype=np.float64)
     var2 = np.asarray(var2, dtype=np.float64)
-    n1 = np.asarray(n1, dtype=np.int64)
-    n2 = np.asarray(n2, dtype=np.int64)
+    s1 = np.asarray(s1, dtype=np.int64)
+    s2 = np.asarray(s2, dtype=np.int64)
 
-    if iflag:
-        # Equal variances: pooled variance
-        pooled_var = ((n1 - 1) * var1 + (n2 - 1) * var2) / (n1 + n2 - 2)
-        se = np.sqrt(pooled_var * (1.0 / n1 + 1.0 / n2))
-        df = n1 + n2 - 2
+    if not iflag:
+        # iflag=False: Equal variances (pooled variance)
+        pooled_var = ((s1 - 1) * var1 + (s2 - 1) * var2) / (s1 + s2 - 2)
+        se = np.sqrt(pooled_var * (1.0 / s1 + 1.0 / s2))
+        df = s1 + s2 - 2
     else:
-        # Unequal variances: Welch's t-test
-        se = np.sqrt(var1 / n1 + var2 / n2)
+        # iflag=True: Unequal variances (Welch's t-test)
+        se = np.sqrt(var1 / s1 + var2 / s2)
         # Welch-Satterthwaite degrees of freedom
-        df = (var1 / n1 + var2 / n2)**2 / \
-             ((var1 / n1)**2 / (n1 - 1) + (var2 / n2)**2 / (n2 - 1))
+        df = (var1 / s1 + var2 / s2)**2 / \
+             ((var1 / s1)**2 / (s1 - 1) + (var2 / s2)**2 / (s2 - 1))
         df = df.astype(np.int64)
 
     # Calculate t-statistic
     t_val = (ave1 - ave2) / se
 
+    # Calculate two-tailed probability
+    prob = 2.0 * (1.0 - sp_stats.t.cdf(np.abs(t_val), df))
+
     if tval_opt:
-        # Return t-value
-        return t_val
+        # Return both probability and t-value
+        return (prob, t_val)
     else:
-        # Return two-tailed probability
-        prob = 2.0 * (1.0 - sp_stats.t.cdf(np.abs(t_val), df))
+        # Return probability only
         return prob
 
 
